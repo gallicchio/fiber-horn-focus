@@ -1,0 +1,16 @@
+# Simulation environment: Meep (FDTD) with its MPB mode solver, MPI build.
+#   micromamba create -f environment.yml      (or conda / mamba)
+name: fiberlaunch
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pymeep=1.35.0=mpi_mpich*
+  - mpi4py
+  - numpy
+  - scipy
+  - matplotlib>=3.10   # the "berlin" colormap
+  - h5py
+  - imageio
+  - ffmpeg
+  - pytest

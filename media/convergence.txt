@@ -1,0 +1,21 @@
+theory: Fresnel R(n_clad) = 0.0337, R(n_eff) = 0.0351, HE11 n_eff = 1.461070
+narrow: scalar overlap 0.3937, x Fresnel(n_eff) 0.3799
+matched: scalar overlap 0.9963, x Fresnel(n_eff) 0.9614
+wide: scalar overlap 0.3582, x Fresnel(n_eff) 0.3456
+ res     case        R      eta  |a-|^2/|a+|^2      n_eff  wall s
+  10   narrow  0.02376  0.38519       3.43e-03   1.461044     183
+  10  matched  0.02501  0.96995       3.43e-03   1.461044     182
+  10     wide  0.02666  0.38168       3.43e-03   1.461044     193
+  12   narrow  0.02707  0.38368       1.54e-03   1.461052     340
+  12  matched  0.02842  0.96702       1.54e-03   1.461052     305
+  12     wide  0.03028  0.37941       1.54e-03   1.461052     400
+  16   narrow  0.03025  0.38218       4.58e-04   1.461060     675
+  16  matched  0.03174  0.96399       4.58e-04   1.461060     704
+  16     wide  0.03376  0.37714       4.58e-04   1.461060    1019
+  20   narrow  0.03168  0.38149       1.82e-04   1.461063    1706
+  20  matched  0.03324  0.96256       1.82e-04   1.461063    1905
+  20     wide  0.03533  0.37609       1.82e-04   1.461063    2151
+extrapolated to infinite resolution (fit X = X_inf + c / res^2):
+    narrow: R 0.0344   eta 0.3803   (from res [10, 12, 16, 20])
+   matched: R 0.0360   eta 0.9601   (from res [10, 12, 16, 20])
+      wide: R 0.0383   eta 0.3742   (from res [10, 12, 16, 20])

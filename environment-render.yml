@@ -1,0 +1,16 @@
+# 3D rendering environment: PyVista on an off-screen (OSMesa) VTK, so it needs no display
+# or GPU.  Separate from the simulation environment because the MPI build of HDF5 that
+# Meep needs conflicts with VTK's.
+#   micromamba create -f environment-render.yml
+name: fiberlaunch-render
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - vtk-base=*=osmesa*
+  - pyvista
+  - numpy
+  - matplotlib
+  - imageio
+  - imageio-ffmpeg
+  - ffmpeg
