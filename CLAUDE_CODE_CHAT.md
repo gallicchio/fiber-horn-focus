@@ -729,3 +729,24 @@ horn's numbers stay in STUDY.md.
 Committed everything since the first commit as one commit: the code, the tests, the docs, this
 log and the regenerated media. The simulation output in `data/` stays out, as `.gitignore`
 says (tens of GB; `make sims` remakes it). Nothing is pushed.
+
+## Prompt 20
+
+> I changed the name of your working directory. Set the remote to be appropriate for
+> "git@github.com:gallicchio/fiber-horn-focus.git". Then I'll push.
+
+## Response 13 2026-11-01 11:26 - 2026-11-01 11:27 Claude Opus 5.5
+
+Added the remote `origin` = `git@github.com:gallicchio/fiber-horn-focus.git`. `main` is at the
+same commit as before (57cfc1a). Nothing in the repository mentions the old directory name, so
+the rename needs no other change. `git push -u origin main` pushes it and makes `origin/main`
+its upstream.
+
+## Prompt 21
+
+> Commit it so that I can push a clean, up to date repo.
+
+## Response 14 2026-11-01 11:28 - 2026-11-01 11:29 Claude Opus 5.5
+
+Committed this log, with these last two exchanges in it, on top of 57cfc1a. The working tree is
+clean and `main` is ready to push to `origin`.
