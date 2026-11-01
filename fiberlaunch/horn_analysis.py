@@ -17,6 +17,12 @@ which separates the directions and the modes exactly where the profiles are exac
 and to about a percent in the horn (checked on TE11 sent out from the throat).  In front of
 the block the split is incident (the field of the same beam with no metal) and reflected
 (total - incident).
+
+A corrugated horn's modes are not those of a smooth guide, so there the part of the field that
+ends up in the guide is found another way, which works for any horn: it is the time reverse of
+the field the horn radiates when TE11 is sent out of the throat (an 'emit' run on the same grid),
+scaled to the TE11 heading in in the throat.  The reflected light is split by where the incident
+beam lands: on the metal face around the mouth, or inside the mouth.
 """
 
 import json
@@ -112,7 +118,10 @@ def project(s, F, m, w=None):
 
 
 class HornRun:
-    def __init__(self, root, case):
+    def __init__(self, root, case, emit=None):
+        """The launch root/case and its beam alone, root/case_air; emit: the horn's 'emit' run at the
+        same resolution, for the part of the field that reaches the guide (needed for a corrugated
+        horn)."""
         self.dir = os.path.join(root, case)
         self.air_dir = os.path.join(root, f"{case}_air")
         self.meta = json.load(open(os.path.join(self.dir, "meta.json")))
@@ -122,21 +131,51 @@ class HornRun:
         self.mouth, self.length = self.meta["mouth_radius"], self.meta["horn_length"]
         self.theta0 = np.radians(self.meta["flare_deg"])
         self.z_apex = self.mouth / np.tan(self.theta0)  # where the cone would close
+        self.wall = self.meta.get("wall", "smooth")
+        self.focus = self.meta.get("focus", 0.0)
+        self.z_source = self.meta["z_source"]
+        self.emit_dir = emit
+        if emit is not None:
+            e = json.load(open(os.path.join(emit, "meta.json")))
+            assert e["res"] == self.meta["res"] and e.get("wall", "smooth") == self.wall, (emit, self.dir)
 
     def radius(self, z):
         return radius_at(z, self.mouth, self.length)
 
     def fields(self, air=False):
-        """r, z and the family profiles of the steady field, each indexed (z, r)."""
+        """r, z and the family profiles of the steady field, each indexed (z, r).  The beam alone
+        (air) is put on the launch's grid; its box may stop just behind the mouth, and is zero
+        beyond."""
         if not air and hasattr(self, "_f"):
             return self._f
+        if air and hasattr(self, "_fa"):
+            return self._fa
         d = np.load(os.path.join(self.air_dir if air else self.dir, "dft_rz.npz"))
         f = d["r"], d["z"], beam.from_meep([d[c].astype(np.complex128) for c in COMPS])
         if not air:
             self._f = f
-        return f
+            return f
+        r, z, F = self.fields()
+        k = _offset(z, f[1])
+        assert len(f[0]) == len(r) and np.allclose(f[0], r), "the beam alone is on another grid"
+        full = [np.zeros_like(c) for c in F]
+        for a, g in zip(full, f[2]):
+            a[k:k + len(f[1])] = g
+        self._fa = r, z, full
+        return self._fa
 
     # ---- where the power goes --------------------------------------------------------
+    def landing(self):
+        """Where the incident beam lands: its power through the plane just in front of the face,
+        inside the mouth and on the metal around it, as fractions of the incident power."""
+        r, z, G = self.fields(air=True)
+        k = int(np.max(np.where(z < 0)[0]))
+        g = [c[k] for c in G]
+        inside = r < self.mouth
+        p_in = beam.power(r[inside], [c[inside] for c in g]) / self.P_inc
+        p_all = beam.power(r, g) / self.P_inc
+        return dict(z=float(z[k]), inside=float(p_in), face=float(p_all - p_in), total=float(p_all))
+
     def budget(self):
         m = self.meta
         throat = [r["flux"] for r in m["flux_planes"] if r["z"] > self.length]
@@ -215,10 +254,31 @@ class HornRun:
             a[j] = amplitudes(s, row, m, w)[0]
         return zs, a
 
-    def side_split(self):
+    def from_emit(self):
+        """The part of the steady field that reaches the guide, from the time reverse (E*, -H*)
+        of the emit run's field, scaled so that its TE11 heading in in the throat is the launch's.
+        Family profiles on the launch's grid (zero outside the emit run's box)."""
+        r, z, F = self.fields()
+        d = np.load(os.path.join(self.emit_dir, "dft_rz.npz"))
+        E = beam.from_meep([d[c].astype(np.complex128) for c in COMPS])
+        k0, nr = _offset(z, d["z"]), len(d["r"])
+        assert np.allclose(d["r"], r[:nr]), "the emit run is on another grid"
+        T = [np.zeros_like(c) for c in F]
+        for t, e, sign in zip(T, E, (1, 1, 1, -1, -1, -1)):
+            t[k0:k0 + len(d["z"]), :nr] = sign * np.conj(e)
+        k = int(np.argmin(abs(z - (self.length + 0.3 * self.meta["throat_length"]))))
+        m = guide_mode(r, float(self.radius(z[k])), "TE", H.TE11_ROOT)
+        alpha = amplitudes(r, [f[k] for f in F], m)[0] / amplitudes(r, [t[k] for t in T], m)[0]
+        return [alpha * t for t in T]
+
+    def side_split(self, method=None):
         """|E|² on the plane of polarization (y = 0, x = ±r): incident and reflected in front of
-        the mouth; TE11 heading in, and the rest, behind it.  Returns r, z and (z, r) arrays."""
-        if hasattr(self, "_side"):
+        the mouth; the part that reaches the guide (TE11 heading in, in the guide), and the rest,
+        behind it.  Inside the horn that part is TE11 heading in on the caps (method 'caps', the
+        smooth horn) or the time-reversed emit field ('emit', any horn; the default for a
+        corrugated one).  Returns r, z and (z, r) arrays."""
+        method = method or ("emit" if self.wall == "corrugated" else "caps")
+        if getattr(self, "_side_method", None) == method:
             return self._side
         r, z, F = self.fields()
         _, _, G = self.fields(air=True)
@@ -229,34 +289,46 @@ class HornRun:
         tot, inc = e2(F), e2(G)
         refl = e2([a - b for a, b in zip(F, G)])
         front = z < 0
-        zs, a = self.te11_in()
-        cone = zs < self.length
-        gui = np.zeros_like(tot)
-        g_r, g_z = np.zeros_like(F[0]), np.zeros_like(F[0])  # TE11 heading in, ρ and z parts
-        # in the horn: each grid point lies on the cap through it; the amplitude, smooth once its
-        # exp(-ikR) is taken out, is interpolated in the cap's distance R from the apex
-        Rc = self.cap_radius(zs[cone])
-        smooth = a[cone] * np.exp(1j * K * Rc)
         Z, Rr = np.meshgrid(z, r, indexing="ij")
-        Ra = np.hypot(Rr, self.z_apex - Z)
-        th = np.arctan2(Rr, self.z_apex - Z)
-        inside = (Z > 0) & (Z < self.length) & (th <= self.theta0)
-        Rp = Ra[inside]
-        A = (np.interp(Rp, Rc[::-1], smooth.real[::-1]) + 1j * np.interp(Rp, Rc[::-1], smooth.imag[::-1])) \
-            * np.exp(-1j * K * Rp)
-        u = np.maximum(H.TE11_ROOT * th[inside] / self.theta0, 1e-9)  # TE11's e_θ on each point's cap
-        e_t = jv(1, u) / u
-        g_r[inside] = A * e_t * np.cos(th[inside])
-        g_z[inside] = A * e_t * np.sin(th[inside])
-        # in the throat: planes
-        for j in np.where(~cone)[0]:
-            k = int(np.argmin(abs(z - zs[j])))
+        g_r, g_z = np.zeros_like(F[0]), np.zeros_like(F[0])  # the part that reaches the guide, ρ and z parts
+        if method == "emit":
+            T = self.from_emit()
+            horn = (Z > 0) & (Z < self.length)
+            g_r[horn], g_z[horn] = T[0][horn], T[2][horn]
+        else:
+            # each grid point lies on the cap through it; TE11's amplitude, smooth once its
+            # exp(-ikR) is taken out, is interpolated in the cap's distance R from the apex
+            zs, a = self.te11_in()
+            cone = zs < self.length
+            Rc = self.cap_radius(zs[cone])
+            smooth = a[cone] * np.exp(1j * K * Rc)
+            Ra = np.hypot(Rr, self.z_apex - Z)
+            th = np.arctan2(Rr, self.z_apex - Z)
+            inside = (Z > 0) & (Z < self.length) & (th <= self.theta0)
+            Rp = Ra[inside]
+            A = (np.interp(Rp, Rc[::-1], smooth.real[::-1]) + 1j * np.interp(Rp, Rc[::-1], smooth.imag[::-1])) \
+                * np.exp(-1j * K * Rp)
+            u = np.maximum(H.TE11_ROOT * th[inside] / self.theta0, 1e-9)  # TE11's e_θ on each point's cap
+            e_t = jv(1, u) / u
+            g_r[inside] = A * e_t * np.cos(th[inside])
+            g_z[inside] = A * e_t * np.sin(th[inside])
+        # in the throat: TE11 heading in, on each plane
+        for k in np.where(z >= self.length)[0]:
             m = guide_mode(r, float(self.radius(z[k])), "TE", H.TE11_ROOT)
-            g_r[k], g_z[k] = a[j] * m[0], 0.0
+            g_r[k], g_z[k] = amplitudes(r, [f[k] for f in F], m)[0] * m[0], 0.0
         gui = abs(g_r) ** 2 + abs(g_z) ** 2
         behind = Z > 0
         rest = np.where(behind, abs(F[0] - g_r) ** 2 + abs(F[2] - g_z) ** 2, 0.0)
         gui = np.where(behind, gui, 0.0)
         self._side = dict(r=r, z=z, total=tot, incident=np.where(front[:, None], inc, 0.0),
                           reflected=np.where(front[:, None], refl, 0.0), guided=gui, rest=rest)
+        self._side_method = method
         return self._side
+
+
+def _offset(z, zs):
+    """Index in z of the first of zs, a run of the same grid."""
+    k = int(np.argmin(abs(z - zs[0])))
+    n = min(len(zs), len(z) - k)
+    assert np.allclose(z[k:k + n], zs[:n], atol=1e-6), "not the same grid"
+    return k

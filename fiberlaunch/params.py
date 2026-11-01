@@ -73,7 +73,8 @@ RESOLUTION = 16  # pixels per wavelength (10.9 per wavelength inside the core)
 DPML = 2.0  # PML thickness on the four sides and at the source end
 DPML_END = 3.0  # PML thickness where the fiber leaves the box
 HALF_WIDTH = 14.0  # half-width of the region inside the PML, x and y
-Z_SOURCE = -4.0  # source plane (in air)
+Z_SOURCE = -4.0  # source plane (in air); the main runs and the horn launches use Z_SOURCE_FAR
+Z_SOURCE_FAR = -8.0  # twice as far out: the pictures show twice as much of the converging beam
 Z_REFL = -2.0  # flux plane in air: incident - reflected power
 GAP_BEHIND_SOURCE = 1.0
 FIBER_LENGTH = 120.0  # length of fiber inside the box (PML not included)
@@ -98,6 +99,35 @@ HORN_LENGTH = (MOUTH_RADIUS - THROAT_RADIUS) / math.tan(math.radians(FLARE_DEG))
 THROAT_LENGTH = 6.0  # straight single-mode guide after the horn, before the absorber
 HORN_RESOLUTION = 120  # pixels per wavelength (43 across the throat's radius); see scripts/horn_design.py
 TE11_ROOT = 1.8412  # first zero of J1'
+HORN_HALF_WIDTH = 18.0  # the horn launches: wide enough for the too-small beams converging from Z_SOURCE_FAR
+
+# The corrugated horn (horn.py --wall corrugated): the same cone, its wall cut into slots
+# perpendicular to the axis.  A slot a quarter wave deep (radially) is open at its mouth, so the
+# wall holds neither E nor H along it and the mode becomes the balanced hybrid HE11.  Near the
+# throat the slots start half a wave deep (a smooth wall, for TE11) and become a quarter wave deep
+# over CORR_CONVERTER slots.  Depths follow the radial-line resonance (horn.slot_depth).
+CORR_PITCH = 0.2  # slot + fin along the axis (λ/5)
+CORR_SLOT = 0.15  # slot width (3/4 of the pitch)
+CORR_CONVERTER = 6  # slots in the mode converter
+CORR_FIRST_DEPTH = 1.0  # the slot nearest the throat: this × its half-wave depth (1: like a smooth wall)
+CORR_DEPTH_SCALE = 1.0  # the other slots: this × their quarter-wave depth
+
+# The three sets of horn launches (scripts/run_horn.sh).  Each is the three beams of CASES, too big,
+# matched and too small by the same factors, around that set's best waist, all three focused at the
+# depth where that best beam is focused (scripts/horn_design.py, from the reverse runs at 120 px/λ).
+HORN_SETS = {
+    # the fiber's own three beams, focused on the mouth
+    "smooth": dict(wall="smooth", w_best=W_MATCHED, focus=0.0),
+    # the smooth horn's best beam is smaller and focused inside: its mouth's wavefront is curved
+    "smooth_focus": dict(wall="smooth", w_best=1.40, focus=3.7),
+    # the corrugated horn: its mouth field is HE11, 98 % Gaussian, on a wavefront centred 1.7 λ inside
+    "corrugated": dict(wall="corrugated", w_best=1.28, focus=1.7),
+}
+CASE_SCALE = {name: c["w0"] / W_MATCHED for name, c in CASES.items()}
+
+
+def horn_waist(set_name, case):
+    return HORN_SETS[set_name]["w_best"] * CASE_SCALE[case]
 
 
 def te11_beta(radius):

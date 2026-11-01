@@ -23,6 +23,10 @@ while on the (r, z) plane the staircase can be made as fine as needed.
          the mouth.  By reciprocity its overlap with any incoming beam is that beam's coupling
          into the throat (scripts/horn_design.py)
 
+The wall is smooth, or corrugated (--wall corrugated): the same cone with its wall cut into
+slots perpendicular to the axis (corrugations(), params.CORR_*).  The beam's waist is on the
+mouth, or --focus λ inside it.
+
 The beam enters through a plane of equivalent electric and magnetic currents (J = ẑ × H,
 M = -ẑ × E of the exact beam, fiberlaunch/beam.py), which radiates it forward only.
 
@@ -38,6 +42,8 @@ import time
 
 import meep as mp
 import numpy as np
+from scipy.optimize import brentq
+from scipy.special import jv, jvp, yv, yvp
 
 from . import beam
 from . import params as P
@@ -53,22 +59,73 @@ def log(*a):
         print(*a, flush=True)
 
 
-class Box:
-    """The (r, z) cell: air in front (z < 0), the metal block with the horn and throat behind."""
+K = 2 * math.pi
 
-    def __init__(self, kind, res, half_width, mouth=MOUTH_RADIUS, flare=FLARE_DEG):
+
+def slot_depth(a, kind):
+    """Radial depth of a slot opening at radius a whose bottom (metal, at a + depth) makes its
+    opening look like an open circuit ('quarter': H_φ = 0 there, the corrugated wall) or a short
+    ('half': E_z = 0 there, like a smooth wall), for the cos φ fields of angular order 1: the
+    slot's E_z ∝ J1(kr) Y1(kb) - J1(kb) Y1(kr), zero on its bottom r = b."""
+    ka = K * a
+    if kind == "quarter":
+        f = lambda b: jvp(1, ka) * yv(1, K * b) - jv(1, K * b) * yvp(1, ka)  # noqa: E731
+        lo, hi = a + 0.05, a + 0.45
+    else:
+        f = lambda b: jv(1, ka) * yv(1, K * b) - jv(1, K * b) * yv(1, ka)  # noqa: E731
+        lo, hi = a + 0.3, a + 0.8
+    bs = np.linspace(lo, hi, 400)
+    v = f(bs)
+    i = int(np.where(np.sign(v[:-1]) != np.sign(v[1:]))[0][0])
+    return brentq(f, bs[i], bs[i + 1]) - a
+
+
+def corrugations(mouth, length, converter=P.CORR_CONVERTER, first=P.CORR_FIRST_DEPTH, scale=P.CORR_DEPTH_SCALE,
+                 pitch=P.CORR_PITCH, slot=P.CORR_SLOT):
+    """The slots of the corrugated horn, from the mouth in: (z_start, z_end, r_bottom).  Slot
+    k spans z = fin + k·pitch ... + slot (a fin pitch - slot thick on the face, every edge on a
+    multiple of 0.05 λ).  The `converter` slots nearest the throat go from `first` × their
+    half-wave depth to their quarter-wave depth; the rest are `scale` × their quarter-wave depth."""
+    fin = pitch - slot
+    n = int((length - fin - slot - fin) / pitch) + 1
+    out = []
+    for k in range(n):
+        z0 = fin + k * pitch
+        zm = z0 + 0.5 * slot
+        a = mouth - (mouth - THROAT_RADIUS) * zm / length
+        j = n - 1 - k  # 0 for the slot nearest the throat
+        if j < converter:
+            f = j / converter
+            d = (1 - f) * first * slot_depth(a, "half") + f * slot_depth(a, "quarter")
+        else:
+            d = scale * slot_depth(a, "quarter")
+        out.append((round(z0, 6), round(z0 + slot, 6), a + d))
+    return out
+
+
+class Box:
+    """The (r, z) cell: air in front (z < 0), the metal block with the horn and throat behind.
+    The beam alone (kind 'air') needs only the air: its box stops just behind the mouth, on the
+    same grid."""
+
+    def __init__(self, kind, res, half_width, mouth=MOUTH_RADIUS, flare=FLARE_DEG, z_source=P.Z_SOURCE,
+                 wall="smooth", corr=None):
         self.kind, self.res, self.hw = kind, res, half_width
         self.A, self.flare = mouth, flare
         self.L = (mouth - THROAT_RADIUS) / math.tan(math.radians(flare))
+        self.z_source, self.wall = z_source, wall
+        self.slots = corrugations(mouth, self.L, **(corr or {})) if wall == "corrugated" else []
         self.sr = half_width + P.DPML
-        self.z_lo = P.Z_SOURCE - P.GAP_BEHIND_SOURCE - P.DPML
+        self.z_lo = z_source - P.GAP_BEHIND_SOURCE - P.DPML
         # an even number of pixels in z, so that every edge below lies between pixels
-        n = 2 * math.ceil(0.5 * res * (self.L + THROAT_LENGTH + P.DPML_END - self.z_lo))
+        end = 1.0 + P.DPML if kind == "air" else self.L + THROAT_LENGTH + P.DPML_END
+        n = 2 * math.ceil(0.5 * res * (end - self.z_lo))
         self.sz = n / res
         self.z_hi = self.z_lo + self.sz
         self.zc = 0.5 * (self.z_lo + self.z_hi)
+        self.dpml_hi = P.DPML if kind == "air" else P.DPML_END
         self.z_in_lo = self.z_lo + P.DPML
-        self.z_in_hi = self.z_hi - P.DPML_END
+        self.z_in_hi = self.z_hi - self.dpml_hi
 
     def snap(self, z):
         d = 1.0 / self.res
@@ -84,7 +141,7 @@ class Box:
     def pml(self):
         return [mp.PML(P.DPML, direction=mp.R),
                 mp.PML(P.DPML, direction=mp.Z, side=mp.Low),
-                mp.PML(P.DPML_END, direction=mp.Z, side=mp.High)]
+                mp.PML(self.dpml_hi, direction=mp.Z, side=mp.High)]
 
     def geometry(self):
         if self.kind == "air":
@@ -94,13 +151,15 @@ class Box:
         # the cone as a prism over its (r, z) outline, one unit thick in the unused φ direction
         horn = [self.v(r, z) - mp.Vector3(0, 0.5, 0)
                 for r, z in ((-self.A, 0.0), (self.A, 0.0), (rt, self.L), (-rt, self.L))]
+        slots = [mp.Block(center=self.v(0, 0.5 * (z0 + z1)), size=mp.Vector3(2 * rb, mp.inf, z1 - z0), material=mp.air)
+                 for z0, z1, rb in self.slots]
         return [
             mp.Block(center=self.v(0, 0.5 * depth), size=mp.Vector3(2 * self.sr + 2, mp.inf, depth),
                      material=mp.metal),
             mp.Prism(horn, height=1.0, axis=mp.Vector3(0, 1, 0), material=mp.air),
             mp.Block(center=self.v(0, self.L + 0.5 * (depth - self.L)), size=mp.Vector3(2 * rt, mp.inf, depth - self.L),
                      material=mp.air),
-        ]
+        ] + slots
 
     def z_plane(self, z, half=None):
         """The disc r < half at depth z (as a center/size pair)."""
@@ -134,17 +193,17 @@ def steady_time(box):
     air is only used in front of the mouth, which it crosses once."""
     ramp = P.TURN_ON * (3.0 + 5.0)
     if box.kind == "air":
-        return ramp - P.Z_SOURCE + 20.0
-    return ramp + 2.5 * (box.z_hi - P.Z_SOURCE) + 20.0
+        return ramp - box.z_source + 20.0
+    return ramp + 2.5 * (box.z_hi - box.z_source) + 20.0
 
 
-def beam_sources(box, w0, src_time):
-    """Equivalent currents on the plane z = Z_SOURCE that radiate the m = +1 half of the beam
-    focused on the mouth (z = 0) forward: J = ẑ × H, M = -ẑ × E."""
+def beam_sources(box, w0, src_time, focus=0.0):
+    """Equivalent currents on the source plane that radiate the m = +1 half of the beam forward,
+    its waist at z = focus (0: on the mouth): J = ẑ × H, M = -ẑ × E."""
     rho = np.linspace(0, box.hw, int(box.hw * 400) + 1)
-    Er, Ep, _, Hr, Hp, _ = beam.to_meep(beam.family(rho, P.Z_SOURCE, w0))
+    Er, Ep, _, Hr, Hp, _ = beam.to_meep(beam.family(rho, box.z_source - focus, w0))
     currents = {mp.Er: -Hp, mp.Ep: Hr, mp.Hr: Ep, mp.Hp: -Er}
-    c = box.z_plane(P.Z_SOURCE)
+    c = box.z_plane(box.z_source)
 
     def amp(prof):
         re, im = np.real(prof), np.imag(prof)
@@ -154,9 +213,9 @@ def beam_sources(box, w0, src_time):
 
 
 def run(kind, w0, res, half_width, out, movie=False, extra_periods=0.0, mouth=MOUTH_RADIUS, flare=FLARE_DEG,
-        frame_res=32):
+        frame_res=32, z_source=P.Z_SOURCE, focus=0.0, wall="smooth", corr=None, tags=None):
     t_start = time.time()
-    box = Box(kind, res, half_width, mouth, flare)
+    box = Box(kind, res, half_width, mouth, flare, z_source, wall, corr)
     src_time = mp.ContinuousSource(frequency=P.FREQ, width=P.TURN_ON)
     if kind == "emit":  # a small x-polarized current sheet in the throat: TE11 a few λ away
         z = box.L + 0.6 * THROAT_LENGTH
@@ -164,7 +223,7 @@ def run(kind, w0, res, half_width, out, movie=False, extra_periods=0.0, mouth=MO
                    mp.Source(src_time, component=mp.Ep, center=box.v(0.075, z), size=mp.Vector3(0.15, 0, 0),
                              amplitude=1j)]
     else:
-        sources = beam_sources(box, w0, src_time)
+        sources = beam_sources(box, w0, src_time, focus)
     sim = mp.Simulation(cell_size=box.cell, resolution=res, geometry=box.geometry(), sources=sources,
                         boundary_layers=box.pml(), dimensions=mp.CYLINDRICAL, m=1, default_material=mp.air)
     if MASTER:
@@ -174,10 +233,12 @@ def run(kind, w0, res, half_width, out, movie=False, extra_periods=0.0, mouth=MO
     meta = dict(kind=kind, w0=w0, beam_na=P.beam_na(w0) if w0 else None, res=res, half_width=half_width,
                 throat_radius=THROAT_RADIUS, mouth_radius=box.A, flare_deg=box.flare,
                 horn_length=box.L, throat_length=THROAT_LENGTH, te11_beta_throat=te11_beta(THROAT_RADIUS),
-                z_lo=box.z_lo, z_hi=box.z_hi, z_source=P.Z_SOURCE, z_refl=P.Z_REFL,
+                z_lo=box.z_lo, z_hi=box.z_hi, z_source=box.z_source, z_refl=P.Z_REFL, focus=focus,
+                wall=wall, corrugation=dict(corr or {}), slots=box.slots,
                 nproc=mp.count_processors(), T_steady=T_ss, dt=dt, dft_periods=P.DFT_PERIODS,
-                fields="Meep m = +1 half; the linearly polarized field is beam.from_meep() of it")
-    log(f"[{kind}] w0={w0} res={res} cell={box.cell} horn L={box.L:.2f} T_ss={T_ss:.1f}")
+                fields="Meep m = +1 half; the linearly polarized field is beam.from_meep() of it", **(tags or {}))
+    log(f"[{kind}] w0={w0} focus={focus} res={res} cell={box.cell} {wall} horn L={box.L:.2f} "
+        f"({len(box.slots)} slots) T_ss={T_ss:.1f}")
 
     step_funcs = []
     sim.init_sim()
@@ -257,18 +318,34 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--kind", choices=["horn", "air", "emit"], default="horn")
     ap.add_argument("--case", choices=list(P.CASES), help="one of the named launch conditions")
-    ap.add_argument("--w0", type=float, help="beam waist on the mouth (overrides --case)")
+    ap.add_argument("--set", choices=list(P.HORN_SETS),
+                    help="one of the sets of launches (params.HORN_SETS): its wall, its focus, and with --case "
+                         "its waist; the launch box (Z_SOURCE_FAR, HORN_HALF_WIDTH) unless given")
+    ap.add_argument("--w0", type=float, help="beam waist (overrides --case)")
+    ap.add_argument("--focus", type=float, help="the waist's depth inside the mouth, in wavelengths (default 0)")
+    ap.add_argument("--z-source", type=float, help=f"the source plane (default {P.Z_SOURCE})")
+    ap.add_argument("--wall", choices=["smooth", "corrugated"])
+    ap.add_argument("--corr", type=json.loads, default=None,
+                    help='corrugation overrides, e.g. \'{"converter": 8, "scale": 1.05}\' (see corrugations())')
     ap.add_argument("--res", type=int, default=HORN_RESOLUTION)
-    ap.add_argument("--half-width", type=float, default=P.HALF_WIDTH)
+    ap.add_argument("--half-width", type=float, help=f"radius of the box inside the PML (default {P.HALF_WIDTH})")
     ap.add_argument("--movie", action="store_true", help="record Re Er(r, z, t) frames")
     ap.add_argument("--extra-periods", type=float, default=0.0, help="run this much longer before the DFT")
     ap.add_argument("--mouth", type=float, default=MOUTH_RADIUS, help="horn mouth radius, in wavelengths")
     ap.add_argument("--flare", type=float, default=FLARE_DEG, help="horn half-angle, in degrees")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    w0 = a.w0 if a.w0 is not None else (P.CASES[a.case]["w0"] if a.case else None)
-    run(a.kind, w0, a.res, a.half_width, a.out, movie=a.movie, extra_periods=a.extra_periods,
-        mouth=a.mouth, flare=a.flare)
+    s = P.HORN_SETS[a.set] if a.set else {}
+    w0 = a.w0 if a.w0 is not None else (
+        (P.horn_waist(a.set, a.case) if a.set else P.CASES[a.case]["w0"]) if a.case else None)
+
+    def pick(value, from_set, default):
+        return value if value is not None else (from_set if a.set else default)
+
+    run(a.kind, w0, a.res, pick(a.half_width, P.HORN_HALF_WIDTH, P.HALF_WIDTH), a.out, movie=a.movie,
+        extra_periods=a.extra_periods, mouth=a.mouth, flare=a.flare,
+        z_source=pick(a.z_source, P.Z_SOURCE_FAR, P.Z_SOURCE), focus=pick(a.focus, s.get("focus"), 0.0),
+        wall=pick(a.wall, s.get("wall"), "smooth"), corr=a.corr, tags=dict(set=a.set, case=a.case))
 
 
 if __name__ == "__main__":

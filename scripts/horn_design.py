@@ -4,7 +4,8 @@ By reciprocity, an incoming beam g couples into the guide's TE11 with efficiency
     η = |∫(E_g × H_h - E_h × H_g)·ẑ dA|² / (16 P_g P_h),
 where h is the field the horn radiates when TE11 is sent out of the throat with power P_h,
 both on one plane just in front of the mouth (z = -0.5).  The beams are the x-polarized
-Gaussians focused on the mouth (z = 0), built exactly (fiberlaunch/beam.py).
+Gaussians focused on the mouth (z = 0), built exactly (fiberlaunch/beam.py).  For the cylindrical
+runs it also finds the best beam focused deeper, inside the horn.
 
     python scripts/horn_design.py data/horn/design/emit_res60 [...]
 
@@ -19,6 +20,8 @@ import os
 import sys
 
 import numpy as np
+from scipy.optimize import minimize
+from scipy.special import j0
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from fiberlaunch import beam  # noqa: E402
@@ -36,18 +39,24 @@ def beam_power(w0):
     return beam.power(rho, beam.family(rho, 0.0, w0))
 
 
-def aperture_theory(mouth=P.MOUTH_RADIUS, flare=P.FLARE_DEG):
-    """The textbook estimate: the mouth is filled with the TE11 field of a guide of the
-    mouth's radius, on the spherical wavefront of a cone of this flare (centred on its apex),
-    and nothing else.  Returns η(w0)."""
+def aperture_theory(wall="smooth", mouth=P.MOUTH_RADIUS, flare=P.FLARE_DEG):
+    """The textbook estimate: the mouth is filled with the mode of a guide of the mouth's radius,
+    on the spherical wavefront of a cone of this flare (centred on its apex), and nothing else.
+    The smooth wall's mode is TE11; the corrugated wall's is the balanced hybrid HE11, linearly
+    polarized with E ∝ J0(2.405 ρ/a) and H = ẑ × E.  Returns η(w0, depth), the beam's waist at
+    z = depth (inside the horn for depth > 0)."""
     rho = np.linspace(0, mouth, 801)
-    t11 = guide_mode(rho, mouth, "TE", P.TE11_ROOT)
+    if wall == "corrugated":
+        u = j0(2.4048 * rho / mouth)
+        mode = [u, -u, 0 * rho, u, u, 0 * rho]
+    else:
+        mode = guide_mode(rho, mouth, "TE", P.TE11_ROOT)
     apex = mouth / np.tan(np.radians(flare))  # apex to mouth, along the axis
     ph = np.exp(1j * beam.K * (np.hypot(rho, apex) - apex))  # the wave leaving the horn
-    h = [ph * t11[0], ph * t11[1], 0 * rho, -ph * t11[3], -ph * t11[4], 0 * rho]  # heading out (-z)
+    h = [ph * mode[0], ph * mode[1], 0 * rho, -ph * mode[3], -ph * mode[4], 0 * rho]  # heading out (-z)
 
-    def eta(w0):
-        g = beam.family(rho, 0.0, w0)
+    def eta(w0, depth=0.0):
+        g = beam.family(rho, -depth, w0)
         return abs(beam.reaction(rho, g, h) - beam.reaction(rho, h, g)) ** 2 / (
             16 * beam_power(w0) * abs(beam.power(rho, h)))
 
@@ -65,9 +74,13 @@ def cylindrical(run, m):
     te11 = guide_mode(r, m["throat_radius"], "TE", P.TE11_ROOT)
     _, P_h = project(r, [f[kt] for f in F], te11)
 
-    def eta(w0):
-        g = beam.family(r, zf, w0)
-        P_g = beam_power(w0)
+    def eta(w0, depth=0.0, spectrum=None):  # waist at z = depth, inside the horn for depth > 0
+        g = beam.family(r, zf - depth, w0, spectrum=spectrum)
+        if spectrum is None:
+            P_g = beam_power(w0)
+        else:  # another beam with this waist (beam.launched_spectrum): its power on a wide plane
+            rho = np.linspace(0, 60.0, 2401)
+            P_g = beam.power(rho, beam.family(rho, 0.0, w0, spectrum=spectrum))
         return abs(beam.reaction(r, g, h) - beam.reaction(r, h, g)) ** 2 / (16 * P_g * P_h)
 
     return eta, f"plane carries {abs(beam.power(r, h)) / P_h:.4f} of the TE11 power sent out"
@@ -124,11 +137,17 @@ def main():
     ap.add_argument("runs", nargs="+")
     a = ap.parse_args()
     series = []  # (res, {name: η}) of the cylindrical runs
-    theory = aperture_theory()
+    walls = {json.load(open(os.path.join(run, "meta.json"))).get("wall", "smooth") for run in a.runs}
+    assert len(walls) == 1, f"one kind of wall at a time, not {walls}"
+    wall = walls.pop()
+    theory = aperture_theory(wall)
     e = np.array([theory(w) for w in WAISTS])
     j = int(np.argmax(e))
-    print(f"aperture theory (TE11 on the mouth, spherical phase): best w0 {WAISTS[j]:.2f}: {e[j]:.4f};  "
-          + "  ".join(f"{k} {theory(c['w0']):.4f}" for k, c in P.CASES.items()))
+    best = minimize(lambda v: -theory(*v), [WAISTS[j], 2.0], method="Nelder-Mead", options=dict(xatol=1e-3, fatol=1e-6))
+    print(f"aperture theory ({'HE11' if wall == 'corrugated' else 'TE11'} on the mouth, spherical phase): "
+          f"best w0 {WAISTS[j]:.2f}: {e[j]:.4f};  "
+          + "  ".join(f"{k} {theory(c['w0']):.4f}" for k, c in P.CASES.items())
+          + f";  best focused inside: w0 {best.x[0]:.2f}, {best.x[1]:.1f} λ in: {-best.fun:.4f}")
     for run in a.runs:
         m = json.load(open(os.path.join(run, "meta.json")))
         cyl = os.path.exists(os.path.join(run, "dft_rz.npz"))
@@ -141,17 +160,21 @@ def main():
         print(f"   best w0 {WAISTS[j]:.2f} (NA {P.beam_na(WAISTS[j]):.3f}): {e[j]:.4f};  the fiber's three beams:  "
               + "  ".join(f"{k} (w0 {c['w0']:.3f}) {eta(c['w0']):.4f}" for k, c in P.CASES.items()))
         if cyl:
-            series.append((m["res"], {k: eta(c["w0"]) for k, c in P.CASES.items()}))
+            best = minimize(lambda v: -eta(*v), [1.45, 3.5], method="Nelder-Mead",
+                            options=dict(xatol=1e-3, fatol=1e-6))
+            print(f"   focused inside the horn instead: best w0 {best.x[0]:.2f}, "
+                  f"{best.x[1]:.1f} λ in from the mouth: {-best.fun:.4f}")
+            series.append((m["res"], {**{k: eta(c["w0"]) for k, c in P.CASES.items()}, "best focus inside": -best.fun}))
     series.sort(key=lambda s: s[0])
     if len(series) >= 3:
         res = [s[0] for s in series]
         print(f"extrapolated to an infinitely fine grid from res {res[-3:]}:")
-        for k in P.CASES:
+        for k in [*P.CASES, "best focus inside"]:
             inf, p = extrapolate(res, np.array([s[1][k] for s in series]))
             e = np.array([s[1][k] for s in series])
             note = (f"->  {inf:.4f}  (error ~ 1/res^{p:.1f})" if inf is not None and 1 <= p <= 4 else
                     f"(not yet smooth enough to extrapolate; the three finest differ by {np.ptp(e[-3:]):.4f})")
-            print(f"   {k:8s} " + "  ".join(f"{r}:{v:.4f}" for r, v in zip(res, e)) + "   " + note)
+            print(f"   {k:17s} " + "  ".join(f"{r}:{v:.4f}" for r, v in zip(res, e)) + "   " + note)
 
 
 if __name__ == "__main__":

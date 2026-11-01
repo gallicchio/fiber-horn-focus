@@ -19,17 +19,24 @@ from scipy.special import j0, j1
 K = 2 * np.pi
 
 
-def family(rho, z, w0, n_theta=4000):
+def angles(n_theta=4000):
+    """The plane-wave angles θ the angular-spectrum integrals are done over, and their step."""
+    dth = 0.5 * np.pi / n_theta
+    return (np.arange(n_theta) + 0.5) * dth, dth
+
+
+def family(rho, z, w0, n_theta=4000, spectrum=None):
     """(e_r, e_phi, e_z, h_r, h_phi, h_z) at radii rho on the plane z (waist at z = 0).
 
     The angular-spectrum integrals are done over the plane-wave angle θ (κ = k sin θ), which
-    removes the 1/k_z of the longitudinal components at grazing angles."""
+    removes the 1/k_z of the longitudinal components at grazing angles.  `spectrum`, if given,
+    replaces the Gaussian's angular spectrum (on the angles of angles(n_theta), at z = 0)."""
     rho = np.asarray(rho, float)[:, None]
-    th = (np.arange(n_theta) + 0.5) * (0.5 * np.pi / n_theta)
-    dth = 0.5 * np.pi / n_theta
+    th, dth = angles(n_theta)
     s, c = np.sin(th), np.cos(th)
     kap, kz = K * s, K * c
-    A = np.pi * w0 ** 2 * np.exp(-(kap * w0) ** 2 / 4) * np.exp(1j * kz * z)
+    A0 = np.pi * w0 ** 2 * np.exp(-(kap * w0) ** 2 / 4) if spectrum is None else spectrum
+    A = A0 * np.exp(1j * kz * z)
     # κ dκ = k² s c dθ;  κ dκ / k_z = k s dθ
     w_e = A * K * K * s * c * dth / (2 * np.pi)  # weight of ∫ κ dκ (...) / 2π
     w_z = A * K * s * dth / (2 * np.pi)  # weight of ∫ κ dκ (...) / (2π k_z)
@@ -42,6 +49,18 @@ def family(rho, z, w0, n_theta=4000):
     a = (w_z * 0.5 * kap ** 2 * J2).sum(1) / K
     h_z = -1j * (w_e * kap * J1).sum(1) / K
     return i0, -i0, e_z, b + a, b - a, h_z
+
+
+def launched_spectrum(w0, z, radius, n_theta=4000):
+    """The angular spectrum (at the waist, as family() takes it) of the beam a source plane of
+    finite radius launches: the exact beam's E_x on the plane z (from its waist), cut off at
+    rho = radius and re-expanded in plane waves (E_x = ∫ A J0(κρ) e^{i k_z z} κ dκ / 2π)."""
+    rho = np.linspace(0, radius, int(radius * 200) + 1)
+    ex = family(rho, z, w0, n_theta)[0]
+    th, _ = angles(n_theta)
+    kap, kz = K * np.sin(th), K * np.cos(th)
+    A = np.array([np.trapezoid(ex * j0(k * rho) * rho, rho) for k in kap])
+    return 2 * np.pi * A * np.exp(-1j * kz * z)
 
 
 def power(rho, f):

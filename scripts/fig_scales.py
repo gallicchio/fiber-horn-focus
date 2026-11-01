@@ -35,7 +35,7 @@ LAM_UM = 1.55
 MM_PER_LAMBDA = LAM_UM * 1e-3 * B.LENGTH_TO_SMF28  # along the fiber, in SMF-28
 UM_PER_LAMBDA_ACROSS = LAM_UM * B.SCALE  # across the fiber, in SMF-28
 
-FACET = (-4.0, 16.0, -6.0, 6.0)  # panel 1: z0, z1, x0, x1 (wavelengths)
+FACET = (-8.0, 16.0, -6.0, 6.0)  # panel 1: z0, z1, x0, x1 (wavelengths); the source is 8 λ out
 FDTD_X = 23.6  # panel 2 shows |x| up to here, just past the real cladding surface
 PATCH_CM = 100.0
 
@@ -101,7 +101,7 @@ def main():
     w1 = 4.4
     h1 = w1 * (x1 - x0) / (z1 - z0)  # panels 1 and 2 at true aspect
     L_fdtd = run.meta["fiber_length"]
-    fz0, fz1 = -5.0, L_fdtd
+    fz0, fz1 = run.meta["z_source"] - 1.0, L_fdtd
     h2 = pw * 2 * FDTD_X / (fz1 - fz0)
     h3, h4 = 1.9, 0.32
     gap_title, gap_axis = 0.45, 0.45  # a bottom axis label, then a heading (+ a top axis)
@@ -141,7 +141,7 @@ def main():
     ax1.set_ylim(x0, x1)
     ax1.set_xlabel("z / λ")
     ax1.set_ylabel("x / λ")
-    L.heading(left, tops[0], "①  The facet: the first 16 λ of the 3D simulation", None, False)
+    L.heading(left, tops[0], "①  The facet: the last 8 λ of the beam in air and the first 16 λ of fiber", None, False)
     L.text(left + w1 + 0.5, tops[0] + 0.05,
            "The electric field itself at one instant (red / blue = + / −),\n"
            "for the spot that is too big.  Each red-and-blue pair of stripes\n"

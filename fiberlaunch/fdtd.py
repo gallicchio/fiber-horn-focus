@@ -37,17 +37,18 @@ def log(*a):
 class Box:
     """Geometry of the computational cell; converts physical z (facet at 0) to Meep z."""
 
-    def __init__(self, kind, res, fiber_length, half_width):
+    def __init__(self, kind, res, fiber_length, half_width, z_source=P.Z_SOURCE):
         self.kind, self.res, self.L, self.hw = kind, res, fiber_length, half_width
+        self.z_source = z_source
         self.sxy = 2 * (half_width + P.DPML)
         if kind == "air":
-            self.z_lo = P.Z_SOURCE - P.GAP_BEHIND_SOURCE - P.DPML
+            self.z_lo = z_source - P.GAP_BEHIND_SOURCE - P.DPML
             self.z_hi = 1.0 + P.DPML
         elif kind == "mode":
             self.z_lo = -P.DPML_END
             self.z_hi = 12.0 + P.DPML_END
         else:
-            self.z_lo = P.Z_SOURCE - P.GAP_BEHIND_SOURCE - P.DPML
+            self.z_lo = z_source - P.GAP_BEHIND_SOURCE - P.DPML
             self.z_hi = fiber_length + P.DPML_END
         self.sz = self.z_hi - self.z_lo
         self.zc = 0.5 * (self.z_lo + self.z_hi)
@@ -116,7 +117,7 @@ COMP_NAMES = ["Ex", "Ey", "Ez", "Hx", "Hy"]
 def steady_time(box):
     """Time by which the CW field is steady everywhere in the box."""
     ramp = P.TURN_ON * (3.0 + 5.0)  # tanh ramp of ContinuousSource(width, slowness=3)
-    return ramp + 1.5 * (box.z_hi - P.Z_SOURCE) + 10.0
+    return ramp + 1.5 * (box.z_hi - box.z_source) + 10.0
 
 
 def make_sim(box, w0):
@@ -129,8 +130,8 @@ def make_sim(box, w0):
     else:
         sources = [mp.GaussianBeam3DSource(
             mp.ContinuousSource(frequency=P.FREQ, width=P.TURN_ON),
-            center=box.v(z=P.Z_SOURCE), size=mp.Vector3(2 * box.hw, 2 * box.hw, 0),
-            beam_x0=mp.Vector3(0, 0, 0.0 - P.Z_SOURCE),  # focus on the facet
+            center=box.v(z=box.z_source), size=mp.Vector3(2 * box.hw, 2 * box.hw, 0),
+            beam_x0=mp.Vector3(0, 0, 0.0 - box.z_source),  # focus on the facet
             beam_kdir=mp.Vector3(0, 0, 1), beam_w0=w0, beam_E0=mp.Vector3(1, 0, 0))]
     return mp.Simulation(cell_size=box.cell, resolution=box.res, geometry=box.geometry(),
                          sources=sources, boundary_layers=box.pml(), symmetries=SYMMETRIES,
@@ -151,9 +152,9 @@ def save_dft_plane(sim, dft, path, zc):
 
 
 def run(kind, w0, res, fiber_length, half_width, out, movie=False, xy_planes=False,
-        mode_planes=None, check_steady=False, frame_every=None):
+        mode_planes=None, check_steady=False, frame_every=None, z_source=P.Z_SOURCE):
     t_start = time.time()
-    box = Box(kind, res, fiber_length, half_width)
+    box = Box(kind, res, fiber_length, half_width, z_source)
     sim = make_sim(box, w0)
     if MASTER:
         os.makedirs(out, exist_ok=True)
@@ -161,7 +162,7 @@ def run(kind, w0, res, fiber_length, half_width, out, movie=False, xy_planes=Fal
                 fiber_length=fiber_length, half_width=half_width,
                 n_core=P.N_CORE, n_clad=P.N_CLAD, core_radius=P.CORE_RADIUS,
                 z_lo=box.z_lo, z_hi=box.z_hi, dpml=P.DPML, dpml_end=P.DPML_END,
-                z_source=P.Z_SOURCE, z_refl=P.Z_REFL, nproc=mp.count_processors())
+                z_source=box.z_source, z_refl=P.Z_REFL, nproc=mp.count_processors())
     T_ss = steady_time(box)
     dt = sim.Courant / res
     meta.update(T_steady=T_ss, dt=dt, dft_periods=P.DFT_PERIODS)
@@ -221,7 +222,7 @@ def run(kind, w0, res, fiber_length, half_width, out, movie=False, xy_planes=Fal
         if xy_planes:
             dz = P.XY_PLANE_DZ
             zs = np.arange(box.z_in_lo + 1.0 + 0.5 * dz, box.z_in_hi, dz)
-            zs = np.array([box.snap(z) for z in zs[zs > P.Z_SOURCE + 0.2]])
+            zs = np.array([box.snap(z) for z in zs[zs > box.z_source + 0.2]])
             for zp in zs:
                 planes.append((zp, sim.add_dft_fields(COMPS, P.FREQ, 0, 1, yee_grid=False,
                                                       **box.xy_plane(zp), **dfa)))
@@ -310,6 +311,7 @@ def main():
     ap.add_argument("--res", type=int, default=P.RESOLUTION)
     ap.add_argument("--length", type=float, default=P.FIBER_LENGTH)
     ap.add_argument("--half-width", type=float, default=P.HALF_WIDTH)
+    ap.add_argument("--z-source", type=float, default=P.Z_SOURCE, help="the source plane (in front of the facet)")
     ap.add_argument("--mode-planes", type=float, nargs="*", default=None)
     ap.add_argument("--movie", action="store_true", help="record Ex(x, z, t) frames")
     ap.add_argument("--xy-planes", action="store_true", help="record the stack of transverse planes")
@@ -319,7 +321,7 @@ def main():
     w0 = a.w0 if a.w0 is not None else (P.CASES[a.case]["w0"] if a.case else None)
     planes = a.mode_planes if a.mode_planes is not None else [z for z in P.MODE_PLANES if z < a.length - 1]
     run(a.kind, w0, a.res, a.length, a.half_width, a.out, movie=a.movie, xy_planes=a.xy_planes,
-        mode_planes=planes, check_steady=a.check_steady)
+        mode_planes=planes, check_steady=a.check_steady, z_source=a.z_source)
 
 
 if __name__ == "__main__":

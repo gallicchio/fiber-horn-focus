@@ -11,8 +11,12 @@ webp() {  # in.mp4 out.webp width fps quality
   echo "$2: $(du -h "$2" | cut -f1)"
 }
 W=${PREVIEW_WIDTH:-960}
-webp media/launch_movie.mp4   media/launch_movie.webp   "$W" 15 72
+# The field movies run at 2 periods a second: 6 frames a period at 12 fps still reads as smooth
+# travelling waves.  The fiber's (55 s of fine fringes) is smaller, to stay under 10 MB.
+webp media/launch_movie.mp4   media/launch_movie.webp   800 12 55
 webp media/cross_sections.mp4 media/cross_sections.webp "$W" 12 72
 webp media/long_distance.mp4  media/long_distance.webp  "$W" 12 72
-webp media/horn_movie.mp4     media/horn_movie.webp     "$W" 15 72
+webp media/horn_movie.mp4     media/horn_movie.webp     "$W" 12 65
+webp media/horn_focus_movie.mp4 media/horn_focus_movie.webp "$W" 12 65
+webp media/corrugated_movie.mp4 media/corrugated_movie.webp "$W" 12 65
 if [ -f media/launch_3d.mp4 ]; then webp media/launch_3d.mp4 media/launch_3d.webp "$W" 15 72; fi

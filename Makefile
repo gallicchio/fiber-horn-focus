@@ -1,5 +1,5 @@
-# Reproduce everything.  `make envs` once, then `make sims` (~23 h on a 16-core desktop),
-# then `make media`.  Raw output goes to data/ (about 15 GB, not in git).
+# Reproduce everything.  `make envs` once, then `make sims` (~2½ days on a 16-core desktop),
+# then `make media`.  Raw output goes to data/ (about 25 GB, not in git).
 SIM_ENV    ?= $(HOME)/micromamba/envs/fiberlaunch
 RENDER_ENV ?= $(HOME)/micromamba/envs/fiberlaunch-render
 PY  := $(SIM_ENV)/bin/python
@@ -36,11 +36,14 @@ media: figures movies render previews
 
 figures:
 	$(PY) scripts/fig_theory.py
+	$(PY) scripts/fig_incoming.py
 	$(PY) scripts/fig_results.py --root $(ROOT)
 	$(PY) scripts/fig_scales.py --root $(ROOT)
 	$(PY) scripts/summarize_convergence.py | tee media/convergence.txt
 	$(PY) scripts/check_steady.py --root $(ROOT) | tee media/steady_state.txt
 	$(PY) scripts/horn_design.py $(foreach r,20 40 60 80 120,data/horn/design/emit_res$(r)) | tee media/horn_design.txt
+	$(PY) scripts/horn_design.py $(foreach r,40 60 80 120,data/horn/design/corrugated_emit_res$(r)) | tee media/horn_design_corrugated.txt
+	$(PY) scripts/horn_estimates.py | tee media/horn_estimates.txt
 	$(PY) scripts/horn_media.py --only side modes budget
 
 movies:

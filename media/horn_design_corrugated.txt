@@ -1,0 +1,22 @@
+aperture theory (HE11 on the mouth, spherical phase): best w0 1.30: 0.9533;  narrow 0.2118  matched 0.9020  wide 0.4146;  best focused inside: w0 1.26, 1.9 λ in: 0.9816
+corrugated_emit_res40: res 40, mouth 2.1 flare 8.0 L 12.38  (plane carries 0.9990 of the TE11 power sent out)
+   0.50:0.3035  0.60:0.4177  0.70:0.5334  0.80:0.6423  0.90:0.7380  1.00:0.8162  1.10:0.8750  1.20:0.9144  1.30:0.9361  1.40:0.9428  1.45:0.9414  1.50:0.9372  1.55:0.9307  1.60:0.9222  1.65:0.9119  1.70:0.9001  1.75:0.8871  1.80:0.8731  1.85:0.8582  1.90:0.8428  1.95:0.8268  2.00:0.8105  2.05:0.7940  2.10:0.7773  2.15:0.7606  2.20:0.7439  2.40:0.6786  2.60:0.6172  2.80:0.5610  3.00:0.5103
+   best w0 1.40 (NA 0.227): 0.9428;  the fiber's three beams:  narrow (w0 4.976) 0.2247  matched (w0 1.659) 0.9100  wide (w0 0.553) 0.3630
+   focused inside the horn instead: best w0 1.31, 2.2 λ in from the mouth: 0.9731
+corrugated_emit_res60: res 60, mouth 2.1 flare 8.0 L 12.38  (plane carries 1.0013 of the TE11 power sent out)
+   0.50:0.3351  0.60:0.4536  0.70:0.5707  0.80:0.6786  0.90:0.7715  1.00:0.8458  1.10:0.9002  1.20:0.9351  1.30:0.9527  1.40:0.9557  1.45:0.9526  1.50:0.9468  1.55:0.9389  1.60:0.9290  1.65:0.9175  1.70:0.9046  1.75:0.8906  1.80:0.8757  1.85:0.8600  1.90:0.8438  1.95:0.8272  2.00:0.8103  2.05:0.7933  2.10:0.7761  2.15:0.7590  2.20:0.7419  2.40:0.6755  2.60:0.6136  2.80:0.5571  3.00:0.5062
+   best w0 1.40 (NA 0.227): 0.9557;  the fiber's three beams:  narrow (w0 4.976) 0.2219  matched (w0 1.659) 0.9154  wide (w0 0.553) 0.3972
+   focused inside the horn instead: best w0 1.30, 1.9 λ in from the mouth: 0.9820
+corrugated_emit_res80: res 80, mouth 2.1 flare 8.0 L 12.38  (plane carries 1.0003 of the TE11 power sent out)
+   0.50:0.3384  0.60:0.4586  0.70:0.5773  0.80:0.6858  0.90:0.7785  1.00:0.8517  1.10:0.9043  1.20:0.9373  1.30:0.9528  1.40:0.9537  1.45:0.9497  1.50:0.9431  1.55:0.9344  1.60:0.9238  1.65:0.9116  1.70:0.8982  1.75:0.8836  1.80:0.8683  1.85:0.8522  1.90:0.8357  1.95:0.8188  2.00:0.8016  2.05:0.7843  2.10:0.7670  2.15:0.7498  2.20:0.7326  2.40:0.6661  2.60:0.6043  2.80:0.5481  3.00:0.4977
+   best w0 1.40 (NA 0.227): 0.9537;  the fiber's three beams:  narrow (w0 4.976) 0.2174  matched (w0 1.659) 0.9094  wide (w0 0.553) 0.4014
+   focused inside the horn instead: best w0 1.28, 1.9 λ in from the mouth: 0.9819
+corrugated_emit_res120: res 120, mouth 2.1 flare 8.0 L 12.38  (plane carries 1.0009 of the TE11 power sent out)
+   0.50:0.3390  0.60:0.4581  0.70:0.5759  0.80:0.6843  0.90:0.7774  1.00:0.8515  1.10:0.9053  1.20:0.9394  1.30:0.9560  1.40:0.9579  1.45:0.9543  1.50:0.9481  1.55:0.9397  1.60:0.9294  1.65:0.9174  1.70:0.9042  1.75:0.8898  1.80:0.8745  1.85:0.8586  1.90:0.8421  1.95:0.8252  2.00:0.8081  2.05:0.7908  2.10:0.7735  2.15:0.7562  2.20:0.7391  2.40:0.6723  2.60:0.6101  2.80:0.5536  3.00:0.5028
+   best w0 1.40 (NA 0.227): 0.9579;  the fiber's three beams:  narrow (w0 4.976) 0.2199  matched (w0 1.659) 0.9153  wide (w0 0.553) 0.4015
+   focused inside the horn instead: best w0 1.30, 1.8 λ in from the mouth: 0.9815
+extrapolated to an infinitely fine grid from res [60, 80, 120]:
+   narrow            40:0.2247  60:0.2219  80:0.2174  120:0.2199   (not yet smooth enough to extrapolate; the three finest differ by 0.0045)
+   matched           40:0.9100  60:0.9154  80:0.9094  120:0.9153   (not yet smooth enough to extrapolate; the three finest differ by 0.0060)
+   wide              40:0.3630  60:0.3972  80:0.4014  120:0.4015   (not yet smooth enough to extrapolate; the three finest differ by 0.0042)
+   best focus inside 40:0.9731  60:0.9820  80:0.9819  120:0.9815   (not yet smooth enough to extrapolate; the three finest differ by 0.0005)
